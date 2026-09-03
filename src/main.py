@@ -157,8 +157,8 @@ def monitor_command(args):
         print(f"Current videos: {os.path.join('data', 'videos')}")
         return
 
-    from .video_profiles import resolve_profile
-    profile = resolve_profile(source)
+    from .camera_profiles import resolve_profile
+    profile = resolve_profile(source, camera_id=getattr(args, 'camera_id', None))
     monitor = ComplianceMonitor(args.model, profile=profile)
 
     cap = cv2.VideoCapture(source)
@@ -279,6 +279,11 @@ def main():
     monitor_parser.add_argument('--source', default='0', help='Video source')
     monitor_parser.add_argument('--output', default='outputs/videos/gls_output.mp4', help='Output video')
     monitor_parser.add_argument('--save-video', action='store_true', help='Save video')
+    monitor_parser.add_argument(
+        '--camera-id', default=None,
+        help='Stable camera identity to look up in config/cameras.json '
+             '(e.g. loading_dock_1). Defaults to the source filename.',
+    )
     monitor_parser.set_defaults(func=monitor_command)
     
     args = parser.parse_args()

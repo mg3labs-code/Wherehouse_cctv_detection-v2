@@ -1,0 +1,30 @@
+{
+  "_comment": "Camera-agnostic profile config. 'default' applies to ANY camera/video with no entry below it — this is what makes a brand-new camera work with zero setup. Add an entry under 'cameras' (keyed by a camera_id you choose, or the video's filename stem if you're testing with a file) only when you want to override something for that specific install: draw a danger_zone polygon, change the proximity threshold, or point it at a different aisle-limits setup. This file is read at runtime — edit it and restart the monitor to pick up changes; no code changes or redeploy needed.",
+
+  "default": {
+    "name": "default",
+    "mode": "warehouse",
+    "title": "Hypervis Warehouse Safety Monitor - AI Powered",
+    "location": "Aisle",
+    "enable_yellow_lines": true,
+    "enable_forklift_lights": true,
+    "enable_forklift_detect": true,
+    "enable_ppe_dashboard": true,
+    "proximity_px": 150,
+    "danger_zone": null
+  },
+
+  "cameras": {
+    "_example_loading_dock": {
+      "_comment": "Example only — '_example_loading_dock' will never match a real camera_id, so this entry is inert until you copy it. Rename the key to your real camera_id and adjust the polygon. Points are normalized 0..1 fractions of frame width/height, listed clockwise starting near the top-left of the zone.",
+      "location": "Loading Dock - Camera 1",
+      "proximity_px": 180,
+      "danger_zone": [
+        [0.10, 0.35],
+        [0.90, 0.35],
+        [0.95, 0.95],
+        [0.05, 0.95]
+      ]
+    }
+  }
+}

@@ -11,7 +11,7 @@ import numpy as np
 
 from ..config import Config
 from ..monitor import ComplianceMonitor
-from ..video_profiles import resolve_profile
+from ..camera_profiles import resolve_profile
 from . import store
 
 
@@ -73,7 +73,7 @@ class LiveMonitorService:
         with self._lock:
             return self._latest_jpeg
 
-    def start(self, source: str) -> Dict[str, Any]:
+    def start(self, source: str, camera_id: Optional[str] = None) -> Dict[str, Any]:
         if self._running:
             self.stop()
             time.sleep(0.3)
@@ -89,7 +89,15 @@ class LiveMonitorService:
             if not os.path.isfile(path):
                 raise FileNotFoundError(f"Video not found: {source}")
 
-        profile = resolve_profile(path if not str(source).isdigit() else source)
+        # camera_id is the real, stable identity for a deployed camera — pass
+        # it explicitly whenever you have one (e.g. "loading_dock_1"). It is
+        # looked up as an exact key in config/cameras.json; falling back to
+        # the file name is only for ad-hoc local testing, and is a single
+        # exact-key lookup too, not pattern matching against known clips.
+        profile = resolve_profile(
+            path if not str(source).isdigit() else source,
+            camera_id=camera_id,
+        )
         self._source = int(path) if str(path).isdigit() else path
         self._stop.clear()
         self._last_logged = {}
@@ -212,6 +220,7 @@ class LiveMonitorService:
                 "NO_HELMET",
                 "FORKLIFT_OVERSPEED",
                 "PERSON_IN_DANGER_ZONE",
+                "PERSON_NEAR_FORKLIFT",
                 "PERSON_PRODUCT_TOUCH",
                 "PERSON_PRODUCT_TOUCH_TIME",
                 "MAN_NEAR_CONVEYOR",

@@ -631,8 +631,8 @@ class ComplianceMonitor:
     def __init__(self, model_path=None, profile=None):
         ensure_directories()
         self.config = Config
-        from .video_profiles import is_project16, is_safe_route, is_sawant_forklift, DEFAULT_PROFILE, PROFILES
-        self.profile = profile if profile is not None else dict(PROFILES[DEFAULT_PROFILE])
+        from .camera_profiles import is_project16, is_safe_route, is_sawant_forklift, resolve_profile
+        self.profile = profile if profile is not None else resolve_profile()
         self.is_project16 = is_project16(self.profile)
         self.is_safe_route = is_safe_route(self.profile)
         self.is_sawant = is_sawant_forklift(self.profile)
@@ -645,6 +645,13 @@ class ComplianceMonitor:
         self._detect_yellow_forklift = bool(
             self.profile.get("detect_yellow_forklift", False)
         ) and self._enable_forklift_detect
+        # Generalized, camera-agnostic person<->forklift proximity/danger-zone
+        # check (see danger_zone.py). Replaces per-video hardcoded logic that
+        # never existed for this before — the only prior proximity check was
+        # person<->conveyor, and conveyors are never actually detected since
+        # no custom model was ever trained for that class.
+        from .danger_zone import DangerZoneChecker
+        self._danger_zone_checker = DangerZoneChecker.from_profile(self.profile)
         self._route_distance_m = 0.0
         self._route_last_center = None
         self._route_t0 = None
@@ -1605,6 +1612,21 @@ class ComplianceMonitor:
         violations.extend(self._check_conveyor_safety(frame, people, conveyors))
         violations.extend(self._check_harness_compliance(frame, people, harnesses))
         violations.extend(self._check_forklift_safety(frame, forklifts))
+        # Camera-agnostic proximity/danger-zone check — works on any camera
+        # out of the box (pure distance), refined per-camera if an operator
+        # has configured a danger_zone polygon in config/cameras.json.
+        danger_violations = self._danger_zone_checker.check(people, forklifts, w, h)
+        violations.extend(danger_violations)
+        person_near_forklift = sum(
+            1 for v in danger_violations if v['type'] == 'PERSON_NEAR_FORKLIFT'
+        )
+        person_in_danger_zone = sum(
+            1 for v in danger_violations if v['type'] == 'PERSON_IN_DANGER_ZONE'
+        )
+        if person_near_forklift and self.logger:
+            self.logger.warning(
+                f"VIOLATION: {person_near_forklift} person(s) near forklift"
+            )
         speed_info = getattr(self, '_last_forklift_speed', {}) or {}
         if no_helmet:
             violations.append({
@@ -1635,10 +1657,24 @@ class ComplianceMonitor:
             'forklift_speed_kmh': float(speed_info.get('forklift_speed_kmh', 0.0)),
             'forklift_speed_limit_kmh': float(speed_info.get('forklift_speed_limit_kmh', 8.0)),
             'forklift_overspeed': bool(speed_info.get('forklift_overspeed', False)),
+            'person_near_forklift': person_near_forklift,
+            'person_in_danger_zone': person_in_danger_zone,
         }
 
         alert = None
-        if no_helmet:
+        if person_near_forklift:
+            alert = {
+                'title': 'Person Near Forklift',
+                'location': self.profile.get('location', getattr(self.config, 'ZONE_NAME', 'Aisle')),
+                'time': datetime.now().strftime('%H:%M:%S'),
+            }
+        elif person_in_danger_zone:
+            alert = {
+                'title': 'Person In Danger Zone',
+                'location': self.profile.get('location', getattr(self.config, 'ZONE_NAME', 'Aisle')),
+                'time': datetime.now().strftime('%H:%M:%S'),
+            }
+        elif no_helmet:
             alert = {
                 'title': 'No Helmet Detected',
                 'location': getattr(self.config, 'ZONE_NAME', 'Aisle'),

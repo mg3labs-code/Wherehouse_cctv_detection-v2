@@ -2,13 +2,14 @@
 from __future__ import annotations
 
 import glob
+import hmac
 import os
 import re
 from typing import Optional
 
-from fastapi import FastAPI, File, HTTPException, Query, UploadFile
+from fastapi import FastAPI, File, HTTPException, Query, Request, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import StreamingResponse, FileResponse, Response
+from fastapi.responses import JSONResponse, StreamingResponse, FileResponse, Response
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
@@ -24,16 +25,69 @@ app = FastAPI(
 
 app.add_middleware(
     CORSMiddleware,
-    # Frontend on Railway + local Vite call this API cross-origin
-    allow_origins=["*"],
+    # Explicit, known origins only — see HYPERVIS_ALLOWED_ORIGINS in config.py.
+    # "*" is no longer used: it let any website on the internet call this API
+    # from a visitor's browser.
+    allow_origins=Config.ALLOWED_ORIGINS,
     allow_credentials=False,
     allow_methods=["*"],
     allow_headers=["*"],
 )
 
+# --- API key authentication -------------------------------------------------
+# Every /api/* endpoint requires a shared-secret key, sent as either the
+# X-API-Key header or an api_key query parameter (the query param exists only
+# because the browser's <img>/<video> tags can't set custom headers; this
+# frontend doesn't currently rely on that path — see the frontend's api/client.ts).
+#
+# Two paths are always public, deliberately:
+#   - /api/health: Railway's own health-check prober hits this with no
+#     headers at all. If this required a key, the platform would think the
+#     service was down and restart it in a loop.
+#   - Anything NOT under /api/: this is the built-in static-file server for
+#     the compiled dashboard (frontend/dist). A browser's plain page
+#     navigation can't send a custom header either, so the page shell itself
+#     has to stay reachable — its own JS is what then calls /api/* with the
+#     key attached.
+#
+# NOTE (please read before treating this as done): baking a shared key into a
+# public single-page app's JS bundle deters casual scraping/abuse of a public
+# URL, which is the gap this closes — but the key is visible to anyone who
+# opens browser devtools on the dashboard. It is not per-user authentication.
+# Real user accounts/login are a bigger piece of work than "Phase 0" scope
+# and should follow if/when this handles real customer data.
+_PUBLIC_PATHS = {"/api/health"}
+_API_KEY_HEADER = "x-api-key"
+
+
+@app.middleware("http")
+async def _require_api_key(request: Request, call_next):
+    path = request.url.path
+    if request.method == "OPTIONS" or not path.startswith("/api/") or path in _PUBLIC_PATHS:
+        return await call_next(request)
+
+    expected = Config.API_KEY
+    if not expected:
+        # Fail closed. A misconfigured deployment should refuse traffic, not
+        # silently fall back to the old "wide open to the internet" behavior.
+        return JSONResponse(
+            {"detail": "Server misconfigured: HYPERVIS_API_KEY is not set."},
+            status_code=500,
+        )
+
+    provided = request.headers.get(_API_KEY_HEADER) or request.query_params.get("api_key") or ""
+    if not hmac.compare_digest(provided, expected):
+        return JSONResponse({"detail": "Unauthorized: missing or invalid API key."}, status_code=401)
+
+    return await call_next(request)
+
 
 class StartLiveBody(BaseModel):
     source: str
+    # Stable camera identity looked up in config/cameras.json (see
+    # camera_profiles.py). Optional — omit it for ad-hoc local testing and
+    # the source filename is used as a one-off exact-match lookup key instead.
+    camera_id: Optional[str] = None
 
 
 @app.on_event("startup")
@@ -229,7 +283,7 @@ def live_status():
 @app.post("/api/live/start")
 def live_start(body: StartLiveBody):
     try:
-        return live_service.start(body.source)
+        return live_service.start(body.source, camera_id=body.camera_id)
     except FileNotFoundError as e:
         raise HTTPException(status_code=404, detail=str(e))
     except Exception as e:

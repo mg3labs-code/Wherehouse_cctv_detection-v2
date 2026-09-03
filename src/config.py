@@ -161,7 +161,35 @@ class Config:
     # Extra YOLO aisle zooms are accurate but slow — off by default for realtime
     USE_AISLE_ZOOM = False
     FORKLIFT_MAX_DETS = 2
-    
+
+    # ====== CAMERA PROFILES ======
+    # Config-driven, per-camera profile/zone file (see camera_profiles.py).
+    # Overridable via env var for deployments that keep config outside the repo.
+    CAMERA_CONFIG_PATH = os.environ.get(
+        "HYPERVIS_CAMERA_CONFIG",
+        os.path.join(PROJECT_ROOT, "config", "cameras.json"),
+    )
+
+    # ====== API SECURITY ======
+    # Shared-secret API key required on every /api/* request (see api/app.py).
+    # Set this via a real environment variable in your deployment — never
+    # commit a real key to source control. No default: with none set, the
+    # API refuses every request rather than silently running wide open.
+    API_KEY = os.environ.get("HYPERVIS_API_KEY", "").strip()
+
+    # Comma-separated list of exact origins allowed to call this API from a
+    # browser (e.g. "https://your-dashboard.up.railway.app,http://localhost:5173").
+    # Defaults to localhost dev origins only — set this explicitly for any
+    # real deployment. Never use "*" once real cameras/data are involved.
+    ALLOWED_ORIGINS = [
+        o.strip()
+        for o in os.environ.get(
+            "HYPERVIS_ALLOWED_ORIGINS",
+            "http://localhost:5173,http://127.0.0.1:5173",
+        ).split(",")
+        if o.strip()
+    ]
+
     # ====== COLORS (BGR - OpenCV Format) ======
     COLORS = {
         'PASS': (0, 255, 0),      # Green
